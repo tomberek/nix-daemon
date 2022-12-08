@@ -5,10 +5,11 @@ import (
 	"errors"
 	"io"
 	"os"
+	"time"
 
 	"os/exec"
 
-	"github.com/numtide/go-nix/wire"
+	"github.com/nix-community/go-nix/pkg/wire"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -16,11 +17,11 @@ import (
 // var WORKER_MAGIC_2 = []byte{0x6f, 0x69, 0x78, 0x64, 0x00, 0x00, 0x00, 0x00}
 // var PROTOCOL_VERSION = []byte{0x20, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
 // var NULL32 = []byte{0x00, 0x00, 0x00, 0x00}
-var CLIENT_VERSION uint64 = 0x10a
+var CLIENT_VERSION uint64 = uint64((1<<8 | 34))
 
 var WORKER_MAGIC_1 uint64 = 0x6e697863
 var WORKER_MAGIC_2 uint64 = 0x6478696f
-var PROTOCOL_VERSION uint64 = uint64((1<<8 | 32))
+var PROTOCOL_VERSION uint64 = uint64((1<<8 | 34))
 
 var STDERR_NEXT uint64 = 0x6f6c6d67
 var STDERR_READ uint64 = 0x64617461  // data needed from source
@@ -32,8 +33,9 @@ var STDERR_STOP_ACTIVITY uint64 = 0x53544f50
 var STDERR_RESULT uint64 = 0x52534c54
 
 var wopIsValidPath uint64 = 0x01
+var wopAddBuildLog uint64 = 45
 
-const storePath = "/home/tom/nix/st2"
+const storePath = "daemon"
 
 func main() {
 	var err error
@@ -67,35 +69,53 @@ func main() {
 		log.Fatalf("bad handshake: %s: %d", err.Error(), n)
 	}
 	n, err = wire.ReadUint64(out)
-	if err != nil || n != PROTOCOL_VERSION {
+	if err != nil || n > PROTOCOL_VERSION {
 		log.Fatalf("bad protocol: %s: %d", err.Error(), n)
 	}
 	err = writeUint64(in, CLIENT_VERSION)
 	check(err)
 
+	err = writeUint64(in, 0) // obsolete CPU affinity
+	check(err)
 	err = writeUint64(in, 0) // obsolete reserveSpace
 	check(err)
 
+	i, err := wire.ReadBytesFull(out, 20)
+	check(err)
+	log.Info(string(i))
+	err = processError(out)
+
+	err = writeUint64(in, wopAddBuildLog)
+	check(err)
+	err = writeString(in, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv")
+	check(err)
+
+	// Exit if there is no error sent back
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		os.Exit(0)
+	}()
+
+	// Otherwise, exit with error
 	err = processError(out)
 	check(err)
+	os.Exit(1)
 
-	err = writeUint64(in, wopIsValidPath)
-	check(err)
-	err = writeString(in, "/nix/store/zy9bcny22py17v0710c9rv2ib9jxa6pv-source.drv")
-	check(err)
-
-	err = processError(out)
-	check(err)
-
-	b, err := wire.ReadBool(out)
-	check(err)
-	log.Info(b)
+	// sending a fake log:
+	// err = writeUint64(in, 1)
+	// check(err)
+	// err = writeString(in, "a")
+	// check(err)
+	// err = writeUint64(in, 0)
+	// check(err)
 }
 func processError(out io.Reader) error {
 	for {
 		n, err := wire.ReadUint64(out)
 		check(err)
-		log.Errorf("%x", n)
+		if err != nil {
+			log.Errorf("%x", n)
+		}
 		if n == STDERR_LAST {
 			break
 		}
