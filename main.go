@@ -4,10 +4,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"net"
 	"os"
 	"time"
-
-	"os/exec"
 
 	"github.com/nix-community/go-nix/pkg/wire"
 	log "github.com/sirupsen/logrus"
@@ -36,32 +35,44 @@ var wopIsValidPath uint64 = 0x01
 var wopAddBuildLog uint64 = 45
 
 const storePath = "daemon"
+const daemonSock = "/nix/var/nix/daemon-socket/socket"
 
 func main() {
 	var err error
-	cmd := exec.Command("nix-daemon", "--stdio", "--store", storePath)
+	c, err := net.Dial("unix", daemonSock)
+	if err != nil {
+		log.Info("unable to connect to daemon socket")
+		os.Exit(0)
+	}
+	// cmd := exec.Command("nix-daemon", "--stdio", "--store", storePath)
 
-	pipeR, pipeW := io.Pipe()
-	_, _ = pipeR, pipeW
-	cmd.Stdout = io.MultiWriter(os.Stdout, pipeW)
-	//cmd.Stdout = pipeW
-	cmd.Stderr = os.Stderr
-	fd, err := os.Create("pipe")
-	check(err)
+	//pipeR, pipeW := io.Pipe()
+	//_, _ = pipeR, pipeW
+	//cmd.Stdout = io.MultiWriter(os.Stdout, pipeW)
+	////cmd.Stdout = pipeW
+	//// cmd.Stderr = os.Stderr
 
-	inR, inW := io.Pipe()
-	mw := io.MultiWriter(fd, inW)
-	cmd.Stdin = inR
-	in := mw
+	//fd, err := os.Create("pipe")
+	//check(err)
 
-	//in, err := cmd.StdinPipe()
-	check(err)
-	out := pipeR
-	//out, err := cmd.StdoutPipe()
-	check(err)
+	//inR, inW := io.Pipe()
+	//mw := io.MultiWriter(fd, inW)
+	//cmd.Stdin = inR
+	//in := mw
 
-	err = cmd.Start()
-	check(err)
+	////in, err := cmd.StdinPipe()
+	//check(err)
+	//out := pipeR
+	////out, err := cmd.StdoutPipe()
+	//check(err)
+
+	//err = cmd.Start()
+	//if err != nil {
+	//	log.Info("unable to talk to daemon")
+	//	os.Exit(0)
+	//}
+	in := c
+	out := c
 	err = writeUint64(in, WORKER_MAGIC_1)
 	check(err)
 	n, err := wire.ReadUint64(out)
