@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/nix-community/go-nix/pkg/wire"
@@ -41,7 +42,7 @@ func main() {
 	var err error
 	c, err := net.Dial("unix", daemonSock)
 	if err != nil {
-		log.Info("unable to connect to daemon socket")
+		log.Info("no access to a daemon")
 		os.Exit(0)
 	}
 	// cmd := exec.Command("nix-daemon", "--stdio", "--store", storePath)
@@ -93,7 +94,7 @@ func main() {
 
 	i, err := wire.ReadBytesFull(out, 20)
 	check(err)
-	log.Info(string(i))
+	log.Info("Nix daemon version: " + string(i))
 	err = processError(out)
 
 	err = writeUint64(in, wopAddBuildLog)
@@ -103,14 +104,19 @@ func main() {
 
 	// Exit if there is no error sent back
 	go func() {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
+		log.Info("you are a trusted user")
 		os.Exit(0)
 	}()
 
 	// Otherwise, exit with error
 	err = processError(out)
-	check(err)
-	os.Exit(1)
+	if err != nil {
+		log.Info("you are not a trusted user")
+		os.Exit(1)
+	} else {
+		os.Exit(0)
+	}
 
 	// sending a fake log:
 	// err = writeUint64(in, 1)
@@ -121,11 +127,12 @@ func main() {
 	// check(err)
 }
 func processError(out io.Reader) error {
+	erro := ""
 	for {
 		n, err := wire.ReadUint64(out)
-		check(err)
 		if err != nil {
 			log.Errorf("%x", n)
+			return err
 		}
 		if n == STDERR_LAST {
 			break
@@ -136,22 +143,28 @@ func processError(out io.Reader) error {
 				return err
 			}
 			log.Error("next:", str)
-			// n, err = wire.ReadUint64(out)
-			// if err != nil {
-			// 	return err
-			// }
-			// log.Error(n)
+			erro = erro + str
+			break
 		}
 		if n == STDERR_ERROR {
 			str, err := wire.ReadString(out, 1024)
 			if err != nil {
 				return err
 			}
-			log.Error("error:", str)
-			return errors.New(str)
+			n, err := wire.ReadUint64(out)
+			if err != nil {
+				return err
+			}
+			log.Errorf("error: %s %s", str, strconv.Itoa(int(n)))
+			erro = erro + str
+			break
 		}
 	}
-	return nil
+	if erro == "" {
+		return nil
+	} else {
+		return errors.New(erro)
+	}
 }
 
 func writeUint64(in io.Writer, n uint64) error {
